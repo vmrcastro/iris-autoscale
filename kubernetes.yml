@@ -26,7 +26,7 @@ spec:
         name: iris-autoscale
         env:
         - name: ISC_CPF_MERGE_FILE
-          value: /mnt/cpf/data.cpf
+          value: /mnt/cpf/data_autoscale.cpf
         ports:
         - containerPort: 52773
           protocol: TCP
