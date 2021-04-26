@@ -1,0 +1,35 @@
+Init	; Carga Inicial para Imagem Base -> ATENCAO PARA O USO DE TABS NO INICIO DE CADA LINHA E ENTRE O LABEL E O COMANDO
+	Try {
+		// Desabilita Journal
+		Do ^%SYS.NOJRN
+		// Recupera variaveis de ambiente
+		Write !,"Verificando variaveis de ambiente"
+		For tI = "ISC_PWD", "CI_NAMESPACE", "CI_DATABASE", "CI_DIRECTORY", "CI_PROJECT_DIRECTORY" {
+			Set tAmbiente(tI) = $System.Util.GetEnviron(tI)
+			Write !,tI," ",tAmbiente(tI)
+			If tAmbiente(tI) = "" {
+				Throw $$Throw("Variavel de Ambiente " _ tI _ " nao definida")
+			}
+		}
+		// Variavel para a Production
+		Set tAmbiente("CI_PRODUCTION") = $System.Util.GetEnviron("CI_PRODUCTION")
+		// Variaveis para Executar Método ao final do Installer
+		Set tAmbiente("CI_POST_INSTALLER_CLASS") = $System.Util.GetEnviron("CI_POST_INSTALLER_CLASS")
+		Set tAmbiente("CI_POST_INSTALLER_METHOD") = $System.Util.GetEnviron("CI_POST_INSTALLER_METHOD")
+		// Carrega e executa Installer
+		Write !,"Mudando para o diretório CI",tAmbiente("CI_DIRECTORY")
+		Do $System.Process.CurrentDirectory(tAmbiente("CI_DIRECTORY"))
+		Set tSC = $System.OBJ.Load("%ZCICD.Installer.xml", "ck") Throw:'tSC $$ThrowSC(tSC)
+		Set tSC = ##class(%ZCICD.Installer).setup(.tAmbiente) Throw:'tSC $$ThrowSC(tSC)
+	}
+	Catch tException {
+		Write !,"Problemas na execução!",!!
+		Do $System.Status.DisplayError(tException.AsStatus())
+		Write !!
+		Do $System.Process.Terminate(,200) // Flag de erro para o Build
+	}
+ThrowSC(tSC)	Return ##class(%Exception.StatusException).CreateFromStatus(tSC)
+Throw(tMsg)	Return $$ThrowSC($System.Status.Error(5001, tMsg))
+ZS Init
+Do ^Init
+Halt

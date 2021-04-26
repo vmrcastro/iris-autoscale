@@ -1,0 +1,180 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Export generator="IRIS" version="26" zv="IRIS for UNIX (Ubuntu Server LTS for x86-64 Containers) 2020.1 (Build 215U)" ts="2020-07-14 14:40:49">
+<Class name="%ZCICD.Installer">
+<Description>
+%Installer Manifest CICD.Installer</Description>
+<IncludeCode>%occInclude</IncludeCode>
+<TimeChanged>65574,52791.436945</TimeChanged>
+<TimeCreated>65574,52724.907878</TimeCreated>
+
+<XData name="CICD">
+<Description>
+Definição do Manifesto.</Description>
+<XMLNamespace>INSTALLER</XMLNamespace>
+<Data><![CDATA[
+<Manifest>
+    <Namespace Name="${CI_NAMESPACE}" Create="yes" Code="${CI_NAMESPACE}" Ensemble="1" Data="${CI_NAMESPACE}">
+        <Configuration>
+            <Database Name="${CI_NAMESPACE}" Dir="${CI_DATABASE}" Create="yes"/>
+        </Configuration>
+    </Namespace>
+    <Namespace Name="${CI_NAMESPACE}" Create="no">
+        <Invoke Class="%ZCICD.Installer" Method="DesligaJournal" CheckStatus="true">
+			<Arg Value="${CI_DATABASE}" />
+		</Invoke>
+    	<Invoke Class="%SYS.Journal.System" Method="Stop" CheckStatus="true" />
+        <CSPApplication Url="/csp/${CI_NAMESPACE}" Directory="${CSPDIR}${CI_NAMESPACE}" AuthenticationMethods="64" IsNamespaceDefault="true" GroupById="%ISCMgtPortal" />
+        <Invoke Class="%ZCICD.Installer" Method="CarregaApp" CheckStatus="true">
+            <Arg Value="${CI_DIRECTORY}" />
+            <Arg Value="${CI_PROJECT_DIRECTORY}" />
+        </Invoke>
+        <If Condition='$L("${CI_POST_INSTALLER_CLASS}")>0'>
+ 	    	<If Condition='$L("${CI_POST_INSTALLER_METHOD}")>0'>
+ 		       <Invoke Class='${CI_POST_INSTALLER_CLASS}' Method='${CI_POST_INSTALLER_METHOD}' CheckStatus="true"/>
+			</If>
+        </If>
+        <If Condition='$L("${CI_PRODUCTION}")>0'>
+            <Production Name="${CI_PRODUCTION}" AutoStart="true"/>
+        </If>
+    </Namespace>
+</Manifest>
+]]></Data>
+</XData>
+
+<Method name="DesligaJournal">
+<ClassMethod>1</ClassMethod>
+<FormalSpec>pDatabase:%String</FormalSpec>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	Try {
+		New $Namespace
+		Set $Namespace = "%SYS"
+		Set tDB=##Class(SYS.Database).%OpenId(pDatabase, , .tSC)
+		Return:$$$ISERR(tSC) tSC
+		Set tDB.GlobalJournalState = 2
+		Return tDB.%Save()
+	}
+	Catch tException {
+		Return tException.AsStatus()
+	}
+	Return $$$OK
+]]></Implementation>
+</Method>
+
+<Method name="HabilitaIAM">
+<ClassMethod>1</ClassMethod>
+<FormalSpec>pPassword:%String</FormalSpec>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	Try {
+		New $Namespace
+		Set $Namespace = "%SYS"
+		Write !,"Habilitando IAM"
+		Set tSC = ##class(Security.Applications).Get("/api/IAM", .tProperties) Return:$$$ISERR(tSC) tSC
+		Set tProperties("Enabled") = 1
+		Set tSC = ##class(Security.Applications).Modify("/api/IAM", .tProperties) Return:$$$ISERR(tSC) tSC
+		Kill tProperties
+		// Troca Senha dos Usuários IAM e _SYSTEM
+		Write !,"Trocando Senha usuarios"
+		For tI = "IAM", "_SYSTEM", "SuperUser" {
+			Set tSC = ##class(Security.Users).Get(tI, .tPropUser) Return:$$$ISERR(tSC) tSC
+			Set tPropUser("Enabled") = 1
+			Set tPropUser("Password") = pPassword
+			Set tPropUser("ChangePassword") = 0
+			Set tSC = ##class(Security.Users).Modify(tI, .tPropUser) Return:$$$ISERR(tSC) tSC
+			Kill tPropUser
+		}
+	}
+	Catch tException {
+		Return tException.AsStatus()
+	}
+	Return $$$OK
+]]></Implementation>
+</Method>
+
+<Method name="CriaWebApp">
+<ClassMethod>1</ClassMethod>
+<FormalSpec></FormalSpec>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	Try {
+		New $Namespace
+		Set $Namespace = "%SYS"
+		Write !,"Criando a Web App /v0"
+		Set tProperties("AutheEnabled")=64
+		Set tProperties("DispatchClass")="EnsLib.REST.GenericService"
+		Set tProperties("Enabled")=1
+		Set tProperties("NameSpace")="HIVE"
+		Set tProperties("MatchRoles")=":%DB_%DEFAULT"
+		Set tSC = ##class(Security.Applications).Create("/v0", .tProperties) 
+	}
+	Catch tException {
+		Return tException.AsStatus()
+	}
+	Return tSC
+]]></Implementation>
+</Method>
+
+<Method name="CriaSSLConfig">
+<ClassMethod>1</ClassMethod>
+<FormalSpec></FormalSpec>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	Try {
+		New $Namespace
+		Set $Namespace = "%SYS"
+		Write !,"Criando a Configuracao SSL"
+		Set tProperties("CertificateFile")="auto.crt"
+		Set tProperties("Description")="Server SSL"
+		Set tProperties("Enabled")=1
+		Set tProperties("PrivateKeyFile")="auto.key"
+		Set tProperties("Type")=1
+		Set tProperties("VerifyPeer")=0
+		Set tSC = ##class(Security.SSLConfigs).Create("ServerSSL", .tProperties) 
+	}
+	Catch tException {
+		Return tException.AsStatus()
+	}
+	Return tSC
+]]></Implementation>
+</Method>
+
+<Method name="CarregaApp">
+<ClassMethod>1</ClassMethod>
+<FormalSpec>pDirCI:%String,pDirPROJETO:%String</FormalSpec>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	Try {
+		Write !,"Mudando para o diretório CI",pDirCI
+		Do $System.Process.CurrentDirectory(pDirCI)
+		// Carrega utilitário para ler os artefatos do GIT e compilar
+		Write !,"Carregando Utilitario Git"
+		Set tSC = $System.OBJ.Load("GitLab.xml","cdk") Return:$$$ISERR(tSC) tSC
+		Write !,"Mudando para o diretório CI_PROJETO",pDirPROJETO
+		Do $System.Process.CurrentDirectory(pDirPROJETO)
+		// Carrega aplicação
+		Write !,$system.Process.CurrentDirectory(),!,$system.Process.UserName(),!,##class(isc.git.GitLab).getDir()
+		Do ##class(isc.git.GitLab).load()
+	}
+	Catch tException {
+		Return tException.AsStatus()
+	}
+	Return $$$OK
+]]></Implementation>
+</Method>
+
+<Method name="setup">
+<Description>
+Este é um método gerador cujo código é gerado por XGL.</Description>
+<Internal>1</Internal>
+<ClassMethod>1</ClassMethod>
+<CodeMode>objectgenerator</CodeMode>
+<FormalSpec><![CDATA[&pVars,pLogLevel:%Integer=3,pInstaller:%Installer.Installer,pLogger:%Installer.AbstractLogger]]></FormalSpec>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+ #; Deixe nosso documento XGL gerar código para este método..
+ Quit ##class(%Installer.Manifest).%Generate(%compiledclass, %code, "CICD")
+]]></Implementation>
+</Method>
+</Class>
+</Export>

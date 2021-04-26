@@ -1,0 +1,764 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Export generator="Cache" version="25" zv="Cache for Windows (x86-64) 2017.1.1 (Build 111U)" ts="2018-04-03 12:22:49">
+<Class name="isc.git.Diff">
+<Super>isc.util.OSUtils</Super>
+<TimeChanged>64735,45356.60966</TimeChanged>
+<TimeCreated>64735,45356.560061</TimeCreated>
+
+<Method name="buildDiff">
+<Description>
+Get diff between two points in repository
+repo - repository root directory
+sha1, commitEnd - poins of history in repository
+modified - list of modified files
+added - list of added files 
+deleted - list of deleted files
+
+Internal diff statuses:
+M modified - File has been modified
+C copy-edit - File has been copied and modified //3-arg form
+R rename-edit - File has been renamed and modified //3-arg form
+A added - File has been added
+D deleted - File has been deleted
+U unmerged - File has conflicts after a merge 
+
+do ##class(isc.git.Diff).buildDiff("C:\\temp\GitLab\", "HEAD~10", "HEAD", .modified, .added, .deleted)</Description>
+<ClassMethod>1</ClassMethod>
+<FormalSpec>repo:%String,commitBegin:%String,commitEnd:%String,*modified:%List,*added:%List,*deleted:%List</FormalSpec>
+<Implementation><![CDATA[
+	#include %occCPTJSgen
+	set (modified, added, deleted) = ""
+	$$$TOE(sc, ..createFile(.tempFile))
+	do $system.Process.CurrentDirectory(repo)
+	$$$TOE(sc, ..execute($$$FormatText("git diff --name-status %1 %2 > %3 2>&1", commitBegin, commitEnd, tempFile)))
+	$$$TOE(sc, ..fileToString(tempFile, .diffRaw))
+	for i=1:1:$length(diffRaw, $c(10)) {
+		set element = $piece(diffRaw, $c(10), i)
+		set status = $e($piece(element, $$$TAB))
+		set file = $piece(element, $$$TAB, 2)
+		
+		if ((element="") || ('..isRelevantFile(repo, file))) {
+			continue
+		} elseif ($length(element, $$$TAB)=2) {
+			if ((status="M") || (status="U"))  {
+				set modified = modified _ $lb(file)
+			} elseif (status="A") {
+				set added = added _ $lb(file)
+			} elseif (status="D") {
+				set deleted = deleted _ $lb(file)
+			} else {
+				throw ##class(%Exception.General).%New("INVALID DIFF STATUS: " _ status)
+			}
+		} elseif ($length(element, $$$TAB)=3) {
+			set newFile = $piece(element, $c(9), 3)
+			if (status="C")  {
+				set added = added _ $lb(newFile)
+			} elseif (status="R") {
+				set added = added _ $lb(newFile)
+				set deleted = deleted _ $lb(file)	
+			} else {
+				throw ##class(%Exception.General).%New("INVALID DIFF STATUS: " _ status)
+			}
+		} else {
+			throw ##class(%Exception.General).%New("INVALID DIFF LINE: " _ element)
+		}
+	}
+]]></Implementation>
+</Method>
+
+<Method name="isRelevantFile">
+<Description>
+Determine if the file is neede for git diff </Description>
+<ClassMethod>1</ClassMethod>
+<FormalSpec>dir:%String,file:%String</FormalSpec>
+<ReturnType>%Boolean</ReturnType>
+<Implementation><![CDATA[
+	set ext = $select($length(file, ".")=1:"", 1:$piece(file, ".", *))
+	quit $lf(##class(isc.git.Settings).getSetting("ext"), ext)>0
+]]></Implementation>
+</Method>
+</Class>
+
+
+<Class name="isc.git.GitLab">
+<Super>isc.util.LogUtils</Super>
+<TimeChanged>64736,75599.079738</TimeChanged>
+<TimeCreated>64736,70465.475104</TimeCreated>
+
+<Method name="getDir">
+<ClassMethod>1</ClassMethod>
+<CodeMode>expression</CodeMode>
+<Implementation><![CDATA[##class(%File).NormalizeDirectory($system.Util.GetEnviron("CI_PROJECT_DIR"))
+]]></Implementation>
+</Method>
+
+<Method name="getCommit">
+<Description>
+For CI build - get current commit</Description>
+<ClassMethod>1</ClassMethod>
+<CodeMode>expression</CodeMode>
+<Implementation><![CDATA[$system.Util.GetEnviron("CI_COMMIT_SHA")
+]]></Implementation>
+</Method>
+
+<Method name="load">
+<Description>
+Do a full load
+do ##class(isc.git.GitLab).load()</Description>
+<ClassMethod>1</ClassMethod>
+<Implementation><![CDATA[
+	try {
+		set dir = ..getDir()
+		//do ..executeHooks(.hooks, "before")
+		
+		do ..log("Importing dir " _ dir)
+		do $system.OBJ.ImportDir(dir, ..getExtWildcard(), "c", .errors, 1)
+		throw:$get(errors,0)'=0 ##class(%Exception.General).%New("Load error")
+		
+		//do ..executeHooks(.hooks, "after")
+		
+		$$$TOE(sc, ##class(isc.git.Settings).setSetting("commit", ..getCommit()))
+		
+	} catch ex {
+		write !,$System.Status.GetErrorText(ex.AsStatus()),!
+		do $system.Process.Terminate(, 1)
+	}
+]]></Implementation>
+</Method>
+
+<Method name="loadDiff">
+<Description>
+Do a diff load
+do ##class(isc.git.GitLab).loadDiff()</Description>
+<ClassMethod>1</ClassMethod>
+<Implementation><![CDATA[
+	try {
+		#dim sc,sc1 As %Status = $$$OK
+		set oldCommit = ##class(isc.git.Settings).getSetting("commit")
+		if (oldCommit="") {
+			do ..log("Previous commit not found. Doing full load.")
+			do ..load()
+			halt
+		} else {
+			set dir = ..getDir()
+			do ..executeHooks(.hooks, "before")
+						
+			set newCommit = ..getCommit()
+			do ..log("Importing dir " _ dir)
+			do ..log($$$FormatText("Loading diff between %1 and %2", oldCommit, newCommit))
+		}
+		
+		do ##class(isc.git.Diff).buildDiff(dir, oldCommit, newCommit, .modified, .added, .deleted)
+		
+		set modified = modified _ added
+		do ..logVar(modified, "modified")
+		set items = ""
+		
+		for i=1:1:$ll(modified) {
+			set file = dir _ $lg(modified, i)
+			set sc = $$$ADDSC(sc, $system.OBJ.Load(file,"", .errors, .item,,,,"UTF8"))
+			merge items = item	
+		}
+	
+		do ..logVar(.items, "items")
+		set sc = $$$ADDSC(sc, $system.OBJ.CompileList(.items, "cuk /checkuptodate=expandedonly", .errors))
+		
+		// To-Do delete
+		set deleteCode = ##class(isc.git.Settings).getSetting("delete")
+		if (($ll(deleted)>0) && (deleteCode '="")) {
+			do $classmethod($p(deleteCode, ":"), $p(deleteCode, ":", 2), deleted)
+		}
+				
+		throw:$$$ISERR(sc) ##class(%Exception.StatusException).CreateFromStatus(sc)
+		throw:$get(errors,0)'=0 ##class(%Exception.General).%New("Load error")
+		
+		do ..executeHooks(.hooks, "after")
+		
+		$$$TOE(sc, ##class(isc.git.Settings).setSetting("commit", ..getCommit()))
+		
+		$$$TOE(sc, $system.OBJ.Export(.items, dir _ "diff.xml"))
+		
+		halt
+	} catch ex {
+		do ..logException(ex)
+		do $system.Process.Terminate(, 1)
+	}
+]]></Implementation>
+</Method>
+
+<Method name="executeHooks">
+<ClassMethod>1</ClassMethod>
+<FormalSpec>*hooks:%String,method:%String(VALUELIST=",before,after,rollback")</FormalSpec>
+<Implementation><![CDATA[
+	set hooksDir = ##class(isc.git.Settings).getSetting("hooks")
+	if (hooksDir'="") {
+		do ..log("Running init hooks: " _ method)
+		
+		if method = "before" {
+			set dir = ..getDir()
+			$$$TOE(sc, ##class(isc.git.hook.Manager).execute(dir _ hooksDir, .hooks, "before"))
+		} elseif method = "after" {
+			$$$TOE(sc, ##class(isc.git.hook.Manager).execute(, .hooks, "after"))
+		}
+	} else {
+		do ..log("No hooks")
+	}
+]]></Implementation>
+</Method>
+
+<Method name="test">
+<Description>
+do ##class(isc.git.GitLab).test()</Description>
+<ClassMethod>1</ClassMethod>
+<Implementation><![CDATA[
+	try {
+		set tests = ##class(isc.git.Settings).getSetting("tests")
+		if (tests'="") {
+			set dir = ..getDir()
+			set ^UnitTestRoot = dir
+			
+			$$$TOE(sc, ##class(%UnitTest.Manager).RunTest(tests, "/nodelete"))
+			$$$TOE(sc, ..writeTestHTML())
+			throw:'..isLastTestOk() ##class(%Exception.General).%New("Tests error")
+		}
+		halt
+	} catch ex {
+		do ..logException(ex)
+		do $system.Process.Terminate(, 1)
+	}
+]]></Implementation>
+</Method>
+
+<Method name="package">
+<Description>
+do ##class(GitLab.Main).package()</Description>
+<ClassMethod>1</ClassMethod>
+<Implementation><![CDATA[
+	try {
+		set dir = ..getDir()
+		// TODO
+		do $system.OBJ.ExportAllClasses(dir _ "full.xml", , .errors)
+		throw:$g(errors,0)'=0 ##class(%Exception.General).%New("Package error")
+		halt
+	} catch ex {
+		do ..logException(ex)
+		do $system.Process.Terminate(, 1)
+	}
+]]></Implementation>
+</Method>
+
+<Method name="writeTestHTML">
+<ClassMethod>1</ClassMethod>
+<Implementation><![CDATA[
+	set text = ##class(%Dictionary.XDataDefinition).IDKEYOpen($classname(), "html").Data.Read()
+	set text = $replace(text, "!!!", ..getURL())
+	
+	set file = ##class(%Stream.FileCharacter).%New()
+	set name = ..getDir() _  "tests.html"
+	do file.LinkToFile(name)
+	do file.Write(text)
+	quit file.%Save()
+]]></Implementation>
+</Method>
+
+<Method name="getURL">
+<ClassMethod>1</ClassMethod>
+<Implementation><![CDATA[
+	set url = ##class(isc.git.Settings).getSetting("url")
+	set url = url _ $system.CSP.GetDefaultApp("%SYS")
+	set url = url_"/%25UnitTest.Portal.Indices.cls?Index="_ $g(^UnitTest.Result, 1) _ "&$NAMESPACE=" _ $zconvert($namespace,"O","URL")
+	quit url
+]]></Implementation>
+</Method>
+
+<Method name="getExtWildcard">
+<Description>
+Get extensions as wildcard for import</Description>
+<ClassMethod>1</ClassMethod>
+<ReturnType>%String</ReturnType>
+<Implementation><![CDATA[
+	set extList = ##class(isc.git.Settings).getSetting("ext")
+	set ext = "*." _ $lts(##class(isc.git.Settings).getSetting("ext"), ";*.")
+	quit ext
+]]></Implementation>
+</Method>
+
+<Method name="isLastTestOk">
+<Description>
+w ##class(GitLab.Main).isLastTestOk()</Description>
+<ClassMethod>1</ClassMethod>
+<ReturnType>%Boolean</ReturnType>
+<Implementation><![CDATA[
+	set in = ##class(%UnitTest.Result.TestInstance).%OpenId(^UnitTest.Result)
+	for i=1:1:in.TestSuites.Count() {
+		#dim suite As %UnitTest.Result.TestSuite
+		set suite = in.TestSuites.GetAt(i)
+		return:suite.Status=0 $$$NO
+	}
+	quit $$$YES
+]]></Implementation>
+</Method>
+
+<XData name="html">
+<Data><![CDATA[
+<html lang="en-US">
+<head>
+<meta charset="UTF-8"/>
+<meta http-equiv="refresh" content="0; url=!!!"/>
+<script type="text/javascript">
+window.location.href = "!!!"
+</script>
+</head>
+<body>
+If you are not redirected automatically, follow this <a href='!!!'>link to tests</a>.
+</body>
+</html>
+]]></Data>
+</XData>
+</Class>
+
+
+<Class name="isc.git.Settings">
+<IncludeCode>%syPrompt</IncludeCode>
+<TimeChanged>64736,74000.138668</TimeChanged>
+<TimeCreated>64735,45356.633345</TimeCreated>
+
+<Parameter name="EXT">
+<Description>
+List of extensions relevant to code load</Description>
+<Type>List</Type>
+<Expression>$lb("xml", "cls", "csp", "csr", "mac", "int", "bas", "inc", "gbl", "prj", "obj", "pkg", "gof", "dfi", "pivot", "dashboard")</Expression>
+</Parameter>
+
+<Parameter name="URL">
+<Default>http://127.0.0.1:57772</Default>
+</Parameter>
+
+<Parameter name="GLVN">
+<Default>^isc.git.Settings</Default>
+</Parameter>
+
+<Method name="getSetting">
+<Description>
+Get setting
+Получить настойку
+write ##class(isc.git.Settings).getSetting("ext")</Description>
+<ClassMethod>1</ClassMethod>
+<CodeMode>expression</CodeMode>
+<FormalSpec>name:%String</FormalSpec>
+<ReturnType>%String</ReturnType>
+<Implementation><![CDATA[$get(@..#GLVN@($zcvt(name, "l")), $parameter(,$zcvt(name, "U")))
+]]></Implementation>
+</Method>
+
+<Method name="setSetting">
+<Description>
+Get setting
+Установить настройку
+write ##class(isc.git.Settings).setSetting("ext")</Description>
+<ClassMethod>1</ClassMethod>
+<FormalSpec>name:%String="",value:%String=""</FormalSpec>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	#dim sc As %Status = $$$OK
+	
+	if name = "tests" {
+		// Path relative from the repo root to test suite	
+	} elseif name = "ext" {
+		set:'$listValid(value) sc = $$$ERROR($$$GeneralError, "Extension list should be in $lb format.")	
+	} elseif name = "commit" {
+		// TO-DO commit validation.  
+	} elseif name = "delete" { 
+		set:$length(value, ":")'=2 sc = $$$ERROR($$$GeneralError, "Delete should be in a format: 'class:method'")
+	} elseif name = "url" {
+		// TO-DO url validation. 
+		// "http://127.0.0.1:57772"
+	} elseif name = "hooks" {
+		// Path relative from the repo root to hooks
+	} else {
+		set sc = $$$ERROR($$$GeneralError, $$$FormatText("Setting '%1' does not exist", name))
+	}
+	
+	set:$$$ISOK(sc) @..#GLVN@($zcvt(name, "l")) = value
+	return sc
+]]></Implementation>
+</Method>
+</Class>
+
+
+<Class name="isc.git.hook.Abstract">
+<Description>
+Base hook class.
+You should not subclass directly.
+Extend Global or Local hook classes</Description>
+<TimeChanged>64736,70298.373245</TimeChanged>
+<TimeCreated>64736,42545.011102</TimeCreated>
+
+<Method name="before">
+<Description>
+Code executed before main code load/compile.
+Do not modify.</Description>
+<ClassMethod>1</ClassMethod>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	try {
+		set sc = ..onBefore()
+	} catch ex {
+		set sc = ex.AsStatus()
+	}
+	quit sc
+]]></Implementation>
+</Method>
+
+<Method name="onBefore">
+<Description>
+Code executed before main code load/compile.
+Overwrite this method.</Description>
+<ClassMethod>1</ClassMethod>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[	quit $$$OK
+]]></Implementation>
+</Method>
+
+<Method name="after">
+<Description>
+Code executed after main code load/compile.
+Do not modify.</Description>
+<ClassMethod>1</ClassMethod>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	try {
+		set sc = ..onAfter()
+	} catch ex {
+		set sc = ex.AsStatus()
+	}
+	quit sc
+]]></Implementation>
+</Method>
+
+<Method name="onAfter">
+<Description>
+Code executed before main code load/compile.
+Overwrite this method.</Description>
+<ClassMethod>1</ClassMethod>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[	quit $$$OK
+]]></Implementation>
+</Method>
+
+<Method name="rollback">
+<Description>
+Code executed during rollback.
+Do not modify.</Description>
+<ClassMethod>1</ClassMethod>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	try {
+		set sc = ..onRollback()
+	} catch ex {
+		set sc = ex.AsStatus()
+	}
+	quit sc
+]]></Implementation>
+</Method>
+
+<Method name="onRollback">
+<Description>
+Code executed during rollback.
+Overwrite this method.</Description>
+<ClassMethod>1</ClassMethod>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[	quit $$$OK
+]]></Implementation>
+</Method>
+</Class>
+
+
+<Class name="isc.git.hook.Global">
+<Description>
+Subclass this class to create a hook 
+that would be executed each time the CI is ran.</Description>
+<Super>isc.git.hook.Abstract</Super>
+<TimeChanged>64736,42672.471876</TimeChanged>
+<TimeCreated>64736,42584.312156</TimeCreated>
+</Class>
+
+
+<Class name="isc.git.hook.Local">
+<Super>isc.git.hook.Abstract</Super>
+<TimeChanged>64741,44518.172565</TimeChanged>
+<TimeCreated>64736,43976.051776</TimeCreated>
+
+<Method name="after">
+<Description>
+Code executed after main code load/compile.
+Do not modify.</Description>
+<ClassMethod>1</ClassMethod>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	try {
+		set sc = ..onAfter()
+		do ##class(isc.git.hook.Manager).add($classname())
+	} catch ex {
+		set sc = ex.AsStatus()
+	}
+	quit sc
+]]></Implementation>
+</Method>
+</Class>
+
+
+<Class name="isc.git.hook.Manager">
+<Description>
+Manages hooks
+Class to store local hooks execution</Description>
+<Super>isc.util.LogUtils</Super>
+<TimeChanged>64736,84084.641454</TimeChanged>
+<TimeCreated>64736,44055.647768</TimeCreated>
+
+<Parameter name="GLVN">
+<Default>^isc.git.Hooks</Default>
+</Parameter>
+
+<Method name="add">
+<ClassMethod>1</ClassMethod>
+<FormalSpec>class:%Dictionary.CacheClassname</FormalSpec>
+<Implementation><![CDATA[	set @..#GLVN@(class) = ""
+]]></Implementation>
+</Method>
+
+<Method name="isDone">
+<ClassMethod>1</ClassMethod>
+<CodeMode>expression</CodeMode>
+<FormalSpec>class:%Dictionary.CacheClassname</FormalSpec>
+<ReturnType>%Boolean</ReturnType>
+<Implementation><![CDATA[$data(@..#GLVN@(class))
+]]></Implementation>
+</Method>
+
+<Method name="execute">
+<Description>
+do ##class(isc.git.hook.Manager).execute()</Description>
+<ClassMethod>1</ClassMethod>
+<FormalSpec><![CDATA[directory:%String="",&hooks:%String="",method:%String(VALUELIST=",before,after,rollback")]]></FormalSpec>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	try {
+		#dim sc As %Status = $$$OK
+		do:directory'="" ..load(directory, .loadedHooks)
+		merge hooks = loadedHooks
+		
+		if (method="before") {
+		
+			/// Execute global hooks
+			do ..executeInternal(.hooks, method, "isc.git.hook.Global")
+			
+			/// Execute local hooks
+			do ..executeInternal(.hooks, method, "isc.git.hook.Local")
+		} elseif (method="after") {
+			/// Execute local hooks
+			do ..executeInternal(.hooks, method, "isc.git.hook.Local")
+			
+			/// Execute global hooks
+			do ..executeInternal(.hooks, method, "isc.git.hook.Global")
+		}
+	} catch ex {
+		set sc = ex.AsStatus()
+	}
+	quit sc
+]]></Implementation>
+</Method>
+
+<Method name="executeInternal">
+<ClassMethod>1</ClassMethod>
+<FormalSpec><![CDATA[&hooks:%String="",method:%String(VALUELIST=",before,after"),type:%String(VALUELIST=",isc.git.hook.Global,isc.git.hook.Local")]]></FormalSpec>
+<Implementation><![CDATA[
+	/// Execute hooks
+	set key = ""
+	for {
+		set key=$order(hooks(key)) 
+		quit:key=""
+		continue:$p(key, ".", *)'="cls"
+		set class = $p(key, ".", 1, *-1)
+		continue:'$classmethod(class, "%IsA", type)
+		continue:class=type
+		continue:((type="isc.git.hook.Local") && (..isDone(class)))
+		
+		do ..log("Executing hook class: " _ class)
+		
+		$$$TOE(sc, $classmethod(class, method))
+		do:((type="isc.git.hook.Local") && (method="after")) ..add(class)
+	}
+]]></Implementation>
+</Method>
+
+<Method name="load">
+<Description>
+do ##class(isc.git.hook.Manager).load(,.h)</Description>
+<ClassMethod>1</ClassMethod>
+<FormalSpec>directory:%String,*hooks:%String</FormalSpec>
+<Implementation><![CDATA[
+	do ..log("Importing hooks dir " _ directory)
+	set hooks = ""
+	do $system.OBJ.ImportDir(directory, ##class(isc.git.GitLab).getExtWildcard(), "cukb /displaylog=0", .errors, 1, .hooks)
+	throw:$get(errors,0)'=0 ##class(%Exception.General).%New("Hooks load error")
+]]></Implementation>
+</Method>
+</Class>
+
+
+<Class name="isc.util.LogUtils">
+<TimeChanged>64736,70861.485123</TimeChanged>
+<TimeCreated>64736,70861.485123</TimeCreated>
+
+<Method name="logVar">
+<ClassMethod>1</ClassMethod>
+<FormalSpec>var="",name:%String=""</FormalSpec>
+<ReturnType>%String</ReturnType>
+<Implementation><![CDATA[
+	do ..log("Variable " _ name)
+	zw var
+	/*if $isObject(var) {
+		zw var
+	} elseif $listValid(var) {
+		write $lts(var, ", ")
+	} else {
+		write var
+	}*/
+]]></Implementation>
+</Method>
+
+<Method name="logException">
+<ClassMethod>1</ClassMethod>
+<FormalSpec>ex:%Exception.AbstractException</FormalSpec>
+<Implementation><![CDATA[	do ..logStatus(ex.AsStatus())
+]]></Implementation>
+</Method>
+
+<Method name="logStatus">
+<ClassMethod>1</ClassMethod>
+<FormalSpec>sc:%Status</FormalSpec>
+<Implementation><![CDATA[	do ..log($System.Status.GetErrorText(sc))
+]]></Implementation>
+</Method>
+
+<Method name="log">
+<ClassMethod>1</ClassMethod>
+<FormalSpec>msg:%String</FormalSpec>
+<Implementation><![CDATA[	write !, $$$FormatText("[%1] %2", $zdatetime($ztimestamp, 3, 1, 3), msg), !
+]]></Implementation>
+</Method>
+</Class>
+
+
+<Class name="isc.util.OSUtils">
+<TimeChanged>64735,45356.748119</TimeChanged>
+<TimeCreated>64735,45356.700683</TimeCreated>
+
+<Method name="createFile">
+<Description>
+Create file name
+If name os empty then random file would be created in a Temp directrory
+If name is an extension then new filename would be created
+If name is a filename, then this file would be created
+stream - %Stream.FileBinary pointing to this file
+content - write something into a file. Can be a stream or a string
+
+Создать файл name
+Если name не задан, то возвращается имя созданного файла (в папке Temp). 
+Если name - расширение, то возвращается имя созданного файла (в папке Temp) с заданным расширением.
+stream - стрим файла
+content - строка или stream который записывается в файл</Description>
+<ClassMethod>1</ClassMethod>
+<FormalSpec><![CDATA[&name:%String="",*stream:%Stream.FileBinary,content:%String]]></FormalSpec>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	#dim sc As %Status = $$$OK
+	
+	if name="" {
+		set name = ##class(%File).TempFilename()
+	} elseif $length(name, ".")=1 {
+		set name = ##class(%File).TempFilename(name)
+	}
+	
+	set stream = ##class(%Stream.FileBinary).%New()
+	set sc = stream.LinkToFile(name)
+	
+	if $data(content) {
+		if $isObject(content) {
+			set sc = stream.CopyFrom(content)
+		} else {
+			set sc = stream.Write(content)
+		}
+		quit:$$$ISERR(sc) sc
+		set sc = stream.%Save()
+		do stream.Rewind()
+	}
+	
+	quit sc
+]]></Implementation>
+</Method>
+
+<Method name="fileToString">
+<Description>
+Read file into string. Delete original file
+Прочитать файл в строку</Description>
+<ClassMethod>1</ClassMethod>
+<FormalSpec>name:%String,*content:%String,delete:%Boolean=$$$YES</FormalSpec>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	#dim sc As %Status = $$$OK
+	set stream = ##class(%Stream.FileBinary).%New()
+	set sc = stream.LinkToFile(name)
+	
+	set content = stream.Read($$$MaxStringLength)
+	
+	if delete {
+		kill stream
+		set sc = ..deleteFile(name)
+	}
+	
+	quit sc
+]]></Implementation>
+</Method>
+
+<Method name="deleteFile">
+<Description>
+Delete file
+Удалить файл</Description>
+<ClassMethod>1</ClassMethod>
+<FormalSpec>name:%String</FormalSpec>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	#dim sc As %Status = $$$OK
+	set success = ##class(%File).Delete(name, .code)
+	set:success'=$$$YES sc = $$$ERROR($$$GeneralError, $$$FormatText("Error deleting file %1 with code %2", name, code))
+	quit sc
+]]></Implementation>
+</Method>
+
+<Method name="execute">
+<Description>
+Execute OS command
+Выполнить команду ОС</Description>
+<ClassMethod>1</ClassMethod>
+<FormalSpec>cmd,debug:%Boolean=$$$NO</FormalSpec>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	#dim sc As %Status = $$$OK
+	set code = ""
+	//set out = ""
+	write:debug !, "cmd: ", cmd
+	//set sc = ##class(%Net.Remote.Utility).RunCommandViaZF(cmd, , .out, timeout, $$$YES, .code)
+	set code = $zf(-1, cmd)
+	write:debug !,"code: ", code
+	
+	if code'=0 {
+		set sc1 = $$$ERROR($$$GeneralError, $$$FormatText("ОС command: `%1` exited with status: `%2`", cmd, code))
+		set sc = $$$ADDSC(sc, sc1)	
+	}
+	return sc
+]]></Implementation>
+</Method>
+</Class>
+</Export>
