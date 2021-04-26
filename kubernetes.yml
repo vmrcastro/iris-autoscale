@@ -69,7 +69,4 @@ spec:
       protocol: TCP
       port: 52773
       targetPort: 52773
-    - name: custom-metric
-      protocol: TCP
-      port: 443
-      targetPort: 443
+  type: LoadBalancer
