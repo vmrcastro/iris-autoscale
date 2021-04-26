@@ -1,17 +1,22 @@
-version: 0.2   
+version: 0.2
+env:
+  secrets-manager:
+    REGISTRY_PASSWORD: "containersISCvcastro:password"
+    REGISTRY_USERNAME: "containersISCvcastro:username"   
 phases:
   pre_build:
       commands:
         - TAG="$(date +%Y-%m-%d.%H.%M.%S).$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | head -c 8)"
         - sed -i 's@__CONTAINER_IMAGE__@'"$REPOSITORY_URI:$TAG"'@' kubernetes.yml
-        - aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin $REPOSITORY_URI
         - export KUBECONFIG=$HOME/.kube/config
   build:
     commands:
+      - docker login containers.intersystems.com -u $REGISTRY_USERNAME -p $REGISTRY_PASSWORD
       - docker build --tag $REPOSITORY_URI:$TAG .
 
   post_build:
     commands:
+      - aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin $REPOSITORY_URI
       - docker push $REPOSITORY_URI:$TAG
       - CREDENTIALS=$(aws sts assume-role --role-arn $EKS_KUBECTL_ROLE_ARN --role-session-name codebuild-kubectl --duration-seconds 900)
       - export AWS_ACCESS_KEY_ID="$(echo ${CREDENTIALS} | jq -r '.Credentials.AccessKeyId')"
