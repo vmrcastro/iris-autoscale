@@ -3,7 +3,7 @@ phases:
   pre_build:
       commands:
         - TAG="$(date +%Y-%m-%d.%H.%M.%S).$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | head -c 8)"
-        - sed -i 's@__CONTAINER_IMAGE__@'"$REPOSITORY_URI:$TAG"'@' $KUB_FILE
+        - sed -i 's@__CONTAINER_IMAGE__@'"$REPOSITORY_URI:$TAG"'@' kubernetes.yml
         - $(aws ecr get-login --no-include-email)
         - export KUBECONFIG=$HOME/.kube/config
   build:
@@ -19,4 +19,4 @@ phases:
       - export AWS_SESSION_TOKEN="$(echo ${CREDENTIALS} | jq -r '.Credentials.SessionToken')"
       - export AWS_EXPIRATION=$(echo ${CREDENTIALS} | jq -r '.Credentials.Expiration')
       - aws eks update-kubeconfig --name $EKS_CLUSTER_NAME
-      - kubectl apply -f $KUB_FILE -n $KUB_NAMESPACE
+      - kubectl apply -f kubernetes.yml
