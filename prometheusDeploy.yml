@@ -1,3 +1,117 @@
+# To have Prometheus retrieve metrics from Kubelets with authentication and
+# authorization enabled (which is highly recommended and included in security
+# benchmarks) the following flags must be set on the kubelet(s):
+#
+# --authentication-token-webhook
+# --authorization-mode=Webhook
+#
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: prometheus
+rules:
+- apiGroups: [""]
+  resources:
+  - nodes
+  - nodes/metrics
+  - services
+  - endpoints
+  - pods
+  verbs: ["get", "list", "watch"]
+- apiGroups:
+  - extensions
+  - networking.k8s.io
+  resources:
+  - ingresses
+  verbs: ["get", "list", "watch"]
+- nonResourceURLs: ["/metrics", "/metrics/cadvisor"]
+  verbs: ["get"]
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: prometheus
+  namespace: default
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: prometheus
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: prometheus
+subjects:
+- kind: ServiceAccount
+  name: prometheus
+  namespace: default
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-conf
+data:
+  prometheus.yml: |
+    # my global config
+    global:
+      scrape_interval:     15s # Set the scrape interval to every 15 seconds. Default is every 1 minute.
+      evaluation_interval: 15s # Evaluate rules every 15 seconds. The default is every 1 minute.
+      # scrape_timeout is set to the global default (10s).
+
+    # Alertmanager configuration
+    alerting:
+      alertmanagers:
+      - static_configs:
+        - targets:
+          # - alertmanager:9093
+
+    # Load rules once and periodically evaluate them according to the global 'evaluation_interval'.
+    rule_files:
+      # - "first_rules.yml"
+      # - "second_rules.yml"
+
+    # A scrape configuration containing exactly one endpoint to scrape:
+    # Here it's Prometheus itself.
+    scrape_configs:
+      # The job name is added as a label `job=<job_name>` to any timeseries scraped from this config.
+      - job_name: 'prometheus'
+
+        # metrics_path defaults to '/metrics'
+        metrics_path: '/api/monitor/metrics'
+        # scheme defaults to 'http'.
+
+        kubernetes_sd_configs:
+        - role: pod
+        relabel_configs:
+        # Example relabel to scrape only pods that have
+        # "example.io/should_be_scraped = true" annotation.
+        #  - source_labels: [__meta_kubernetes_pod_annotation_example_io_should_be_scraped]
+        #    action: keep
+        #    regex: true
+        #
+        # Example relabel to customize metric path based on pod
+        # "example.io/metric_path = <metric path>" annotation.
+        #  - source_labels: [__meta_kubernetes_pod_annotation_example_io_metric_path]
+        #    action: replace
+        #    target_label: __metrics_path__
+        #    regex: (.+)
+        #
+        # Example relabel to scrape only single, desired port for the pod
+        # based on pod "example.io/scrape_port = <port>" annotation.
+        #  - source_labels: [__address__, __meta_kubernetes_pod_annotation_example_io_scrape_port]
+        #    action: replace
+        #    regex: ([^:]+)(?::\d+)?;(\d+)
+        #    replacement: $1:$2
+        #    target_label: __address__
+        - action: labelmap
+          regex: __meta_kubernetes_pod_label_(.+)
+        - source_labels: [__meta_kubernetes_namespace]
+          action: replace
+          target_label: kubernetes_namespace
+        - source_labels: [__meta_kubernetes_pod_name]
+          action: replace
+          target_label: kubernetes_pod_name
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -18,6 +132,7 @@ spec:
       labels:
         app: prometheus
     spec:
+      serviceAccountName: prometheus
       containers:
       - image: prom/prometheus
         imagePullPolicy: Always

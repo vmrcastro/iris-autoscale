@@ -28,6 +28,7 @@ Definição do Manifesto.</Description>
             <Arg Value="${CI_DIRECTORY}" />
             <Arg Value="${CI_PROJECT_DIRECTORY}" />
         </Invoke>
+		<Invoke Class="%ZCICD.Installer" Method="CriaWebApp" CheckStatus="true" />
 		<Invoke Class="%ZCICD.Installer" Method="GrantMonitorAppRole" CheckStatus="true" />
         <If Condition='$L("${CI_POST_INSTALLER_CLASS}")>0'>
  	    	<If Condition='$L("${CI_POST_INSTALLER_METHOD}")>0'>
@@ -107,13 +108,13 @@ Definição do Manifesto.</Description>
 	Try {
 		New $Namespace
 		Set $Namespace = "%SYS"
-		Write !,"Criando a Web App /v0"
+		Write !,"Criando a Web App /api/autoscale"
 		Set tProperties("AutheEnabled")=64
-		Set tProperties("DispatchClass")="EnsLib.REST.GenericService"
+		Set tProperties("DispatchClass")="autoscale.REST.Dispatcher"
 		Set tProperties("Enabled")=1
-		Set tProperties("NameSpace")="HIVE"
+		Set tProperties("NameSpace")="AUTOSCALE"
 		Set tProperties("MatchRoles")=":%DB_%DEFAULT"
-		Set tSC = ##class(Security.Applications).Create("/v0", .tProperties) 
+		Set tSC = ##class(Security.Applications).Create("/api/autoscale", .tProperties) 
 	}
 	Catch tException {
 		Return tException.AsStatus()
