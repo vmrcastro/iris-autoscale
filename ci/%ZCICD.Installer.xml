@@ -132,7 +132,7 @@ Definição do Manifesto.</Description>
 		Set $Namespace = "%SYS"
 		Write !,"Modifying /api/monitor App Roles"
 		Set tSC = ##class(Security.Applications).Get("/api/monitor", .tProperties) Return:$$$ISERR(tSC) tSC
-		Set tProperties("MatchRoles")=":%DB_%DEFAULT"
+		Set tProperties("MatchRoles") = tProperties("MatchRoles") _ ":%DB_%DEFAULT"
 		Set tSC = ##class(Security.Applications).Modify("/api/monitor", .tProperties) Return:$$$ISERR(tSC) tSC
 		Kill tProperties
 	}
