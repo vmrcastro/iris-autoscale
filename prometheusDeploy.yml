@@ -2,12 +2,12 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   labels:
-    app: iris-autoscale
-  name: iris-autoscale
+    app: prometheus
+  name: prometheus
 spec:
   selector:
     matchLabels:
-      app: iris-autoscale
+      app: prometheus
   strategy:
     rollingUpdate:
       maxSurge: 25%
@@ -16,22 +16,14 @@ spec:
   template:
     metadata:
       labels:
-        app: iris-autoscale
-      annotations:
-        example.io/should_be_scraped: true
-        example.io/scrape_port: 52773
+        app: prometheus
     spec:
       containers:
-      - args:
-        - --key /mnt/key/iris.key
-        image: __CONTAINER_IMAGE__
+      - image: prom/prometheus
         imagePullPolicy: Always
-        name: iris-autoscale
-        env:
-        - name: ISC_CPF_MERGE_FILE
-          value: /mnt/cpf/data_autoscale.cpf
+        name: prometheus
         ports:
-        - containerPort: 52773
+        - containerPort: 9090
           protocol: TCP
         resources:
           limits:
@@ -43,33 +35,27 @@ spec:
         terminationMessagePath: /dev/termination-log
         terminationMessagePolicy: File
         volumeMounts:
-        - mountPath: /mnt/key
-          name: iris-key-secret
-        - mountPath: /mnt/cpf
-          name: iris-autoscale-cpf
+        - mountPath: /etc/prometheus
+          name: prometheus-conf
       dnsPolicy: ClusterFirst
       restartPolicy: Always
       schedulerName: default-scheduler
       terminationGracePeriodSeconds: 30
       volumes:
-      - name: iris-key-secret
-        secret:
-          defaultMode: 420
-          secretName: iris-key-secret
-      - name: iris-autoscale-cpf
+      - name: prometheus-conf
         configMap:
-          name: iris-autoscale-cpf
+          name: prometheus-conf
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: iris-autoscale-svc
+  name: prometheus-svc
 spec:
   selector:
-    app: iris-autoscale
+    app: prometheus
   ports:
     - name: webserver
       protocol: TCP
-      port: 52773
-      targetPort: 52773
+      port: 9090
+      targetPort: 9090
   type: LoadBalancer

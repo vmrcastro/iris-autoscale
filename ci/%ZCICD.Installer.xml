@@ -28,6 +28,11 @@ Definição do Manifesto.</Description>
             <Arg Value="${CI_DIRECTORY}" />
             <Arg Value="${CI_PROJECT_DIRECTORY}" />
         </Invoke>
+		<Invoke Class="SYS.Monitor.SAM.Config" Method="AddApplicationClass" CheckStatus="true">
+			<Arg Value="CustomMetric.QueueMetric" />
+			<Arg Value="${CI_NAMESPACE}" />
+		</Invoke>
+		<Invoke Class="%ZCICD.Installer" Method="GrantMonitorAppRole" CheckStatus="true" />
         <If Condition='$L("${CI_POST_INSTALLER_CLASS}")>0'>
  	    	<If Condition='$L("${CI_POST_INSTALLER_METHOD}")>0'>
  		       <Invoke Class='${CI_POST_INSTALLER_CLASS}' Method='${CI_POST_INSTALLER_METHOD}' CheckStatus="true"/>
@@ -112,6 +117,27 @@ Definição do Manifesto.</Description>
 		Return tException.AsStatus()
 	}
 	Return tSC
+]]></Implementation>
+</Method>
+
+<Method name="GrantMonitorAppRole">
+<ClassMethod>1</ClassMethod>
+<FormalSpec></FormalSpec>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	Try {
+		New $Namespace
+		Set $Namespace = "%SYS"
+		Write !,"Modifying /api/monitor App Roles"
+		Set tSC = ##class(Security.Applications).Get("/api/monitor", .tProperties) Return:$$$ISERR(tSC) tSC
+		Set tProperties("MatchRoles")=":%DB_%DEFAULT"
+		Set tSC = ##class(Security.Applications).Modify("/api/monitor", .tProperties) Return:$$$ISERR(tSC) tSC
+		Kill tProperties
+	}
+	Catch tException {
+		Return tException.AsStatus()
+	}
+	Return $$$OK
 ]]></Implementation>
 </Method>
 
