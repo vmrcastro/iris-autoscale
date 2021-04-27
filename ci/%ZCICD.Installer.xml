@@ -28,10 +28,6 @@ Definição do Manifesto.</Description>
             <Arg Value="${CI_DIRECTORY}" />
             <Arg Value="${CI_PROJECT_DIRECTORY}" />
         </Invoke>
-		<Invoke Class="SYS.Monitor.SAM.Config" Method="AddApplicationClass" CheckStatus="true">
-			<Arg Value="CustomMetric.QueueMetric" />
-			<Arg Value="${CI_NAMESPACE}" />
-		</Invoke>
 		<Invoke Class="%ZCICD.Installer" Method="GrantMonitorAppRole" CheckStatus="true" />
         <If Condition='$L("${CI_POST_INSTALLER_CLASS}")>0'>
  	    	<If Condition='$L("${CI_POST_INSTALLER_METHOD}")>0'>
@@ -42,6 +38,12 @@ Definição do Manifesto.</Description>
             <Production Name="${CI_PRODUCTION}" AutoStart="true"/>
         </If>
     </Namespace>
+	<Namespace Name="%SYS" Create="no">
+		<Invoke Class="SYS.Monitor.SAM.Config" Method="AddApplicationClass" CheckStatus="true">
+			<Arg Value="CustomMetric.QueueMetric" />
+			<Arg Value="${CI_NAMESPACE}" />
+		</Invoke>
+	</Namespace>
 </Manifest>
 ]]></Data>
 </XData>
