@@ -19,7 +19,7 @@ spec:
         app: iris-autoscale
       annotations:
         example.io/should_be_scraped: true
-        example.io/scrape_port: 52773
+        example.io/scrape_port: "52773"
     spec:
       containers:
       - args:
