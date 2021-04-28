@@ -12,6 +12,8 @@ ClassMethod InvokeEnsembleService(service) As %Status
 {
         set status = ##class(Ens.Director).CreateBusinessService(service, .instance)
         if $$$ISOK(status) {
+               #dim %response as %CSP.Response
+               Do %response.SetHeader("Connection","close")
                #dim response as %DynamicObject
                set status = instance.OnProcessInput(.response)
                if $isObject(response) {
