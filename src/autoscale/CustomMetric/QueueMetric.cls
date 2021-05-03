@@ -10,7 +10,7 @@ Method GetSensors() As %Status
     If (SQLCODE<0 || SQLCODE=100) {
         Return $$$ERROR($$$SQLError, $System.SQL.SQLCODE(SQLCODE))
     }
-    do ..SetSensor("size",queuesize,$System.INetInfo.LocalHostName())
+    do ..SetSensor("size",queuesize)
     Return $$$OK
 }
 
