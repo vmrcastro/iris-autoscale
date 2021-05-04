@@ -19,7 +19,7 @@ spec:
         app: iris-autoscale
     spec:
       containers:
-      - image: __CONTAINER_IMAGE__
+      - image: vmrcastro/iris-autoscale:latest
         imagePullPolicy: Always
         name: iris-autoscale
         ports:

@@ -3,9 +3,6 @@ services:
     build: .
     container_name: iris-autoscale
     image: iris-autoscale:latest
-    command: --key /mnt/key/iris.key
     ports:
       - "9092:52773"
       - "9091:1972"
-    volumes:
-      - ~/data:/mnt/key

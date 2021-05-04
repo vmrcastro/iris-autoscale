@@ -1,4 +1,4 @@
-Class autoscale.BO.Teste Extends Ens.BusinessOperation
+Class autoscale.BO.Test Extends Ens.BusinessOperation
 {
 
 Method OnMessage(pRequest As Ens.StringRequest, Output pResponse As Ens.StringResponse) As %Status
